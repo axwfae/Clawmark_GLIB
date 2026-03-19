@@ -133,7 +133,10 @@ pub fn migrate(
                     // Multiple sections — each becomes a threaded signal
                     let mut root_uuid: Option<String> = None;
                     for (i, section) in sections.iter().enumerate() {
-                        let gist = format!("openclaw-daily: {} (section {})", daily.date, i + 1);
+                        let gist = match &section.header {
+                            Some(h) => format!("openclaw-daily: {} — {}", daily.date, h),
+                            None => format!("openclaw-daily: {} (section {})", daily.date, i + 1),
+                        };
                         let ts = format!("{}T{:02}:00:00", daily.date, (i * 2).min(23));
                         let parent = root_uuid.as_deref();
                         match db.signal(&section.content, Some(&gist), parent, Some(&ts)) {
@@ -162,26 +165,37 @@ pub fn migrate(
     Ok((created, errors))
 }
 
-struct Section {
-    content: String,
+pub struct Section {
+    pub header: Option<String>,
+    pub content: String,
 }
 
 /// Split markdown content by ## headers into sections
-fn split_sections(content: &str) -> Vec<Section> {
+pub fn split_sections(content: &str) -> Vec<Section> {
     let mut sections = Vec::new();
     let mut current = String::new();
+    let mut current_header: Option<String> = None;
 
     for line in content.lines() {
         if line.starts_with("## ") && !current.trim().is_empty() {
-            sections.push(Section { content: current.trim().to_string() });
+            sections.push(Section {
+                header: current_header.take(),
+                content: current.trim().to_string(),
+            });
             current = String::new();
+        }
+        if line.starts_with("## ") {
+            current_header = Some(line.trim_start_matches('#').trim().to_string());
         }
         current.push_str(line);
         current.push('\n');
     }
 
     if !current.trim().is_empty() {
-        sections.push(Section { content: current.trim().to_string() });
+        sections.push(Section {
+            header: current_header.take(),
+            content: current.trim().to_string(),
+        });
     }
 
     sections

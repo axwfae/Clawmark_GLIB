@@ -1,6 +1,6 @@
 //! Database layer — signals, embedding cache, search
 
-use rusqlite::{Connection, OptionalExtension, Result as SqliteResult};
+use rusqlite::{Connection, OptionalExtension};
 use std::path::Path;
 
 pub struct DatabaseManager {
@@ -49,9 +49,19 @@ impl DatabaseManager {
     // =========================================================================
 
     /// Insert a signal with optional gist and parent. Returns short UUID.
+    /// Embeds content inline if no backend is provided (creates one per call).
     pub fn signal(
         &self, content: &str, gist: Option<&str>, parent: Option<&str>,
         created_at: Option<&str>,
+    ) -> Result<String, String> {
+        self.signal_with_backend(content, gist, parent, created_at, None)
+    }
+
+    /// Insert a signal, optionally reusing a pre-created embedding backend.
+    pub fn signal_with_backend(
+        &self, content: &str, gist: Option<&str>, parent: Option<&str>,
+        created_at: Option<&str>,
+        backend: Option<&dyn crate::embedding::EmbeddingBackend>,
     ) -> Result<String, String> {
         if content.trim().is_empty() {
             return Err("Content cannot be empty".to_string());
@@ -91,9 +101,15 @@ impl DatabaseManager {
         }
 
         // Best-effort embedding cache
-        match crate::embedding::embed_content(content) {
-            Ok(emb) => { let _ = self.cache_embedding(&uuid, &emb); }
-            Err(_) => {}
+        if let Some(b) = backend {
+            if let Ok(emb) = b.embed(content) {
+                let _ = self.cache_embedding(&uuid, &emb);
+            }
+        } else {
+            match crate::embedding::embed_content(content) {
+                Ok(emb) => { let _ = self.cache_embedding(&uuid, &emb); }
+                Err(_) => {}
+            }
         }
 
         Ok(uuid[..8].to_string())
@@ -129,22 +145,31 @@ impl DatabaseManager {
         let terms: Vec<&str> = query.split_whitespace().collect();
         if terms.is_empty() { return self.recent(limit); }
 
-        let conditions: Vec<String> = terms.iter()
-            .map(|t| format!("payload LIKE '%{}%'", t.replace('\'', "''")))
+        // Build parameterized LIKE conditions: ?1, ?2, ... for terms, ?N+1 for limit
+        let conditions: Vec<String> = (0..terms.len())
+            .map(|i| format!("payload LIKE ?{}", i + 1))
             .collect();
         let where_clause = conditions.join(" OR ");
+        let limit_param = terms.len() + 1;
 
         let sql = format!(
             "SELECT signal_uuid,
                     COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)) as gist,
                     created_at, parent_uuid
-             FROM signals WHERE {} ORDER BY created_at DESC LIMIT ?1",
-            where_clause
+             FROM signals WHERE {} ORDER BY created_at DESC LIMIT ?{}",
+            where_clause, limit_param
         );
 
         let conn = self.conn()?;
         let mut stmt = conn.prepare(&sql).map_err(|e| format!("Query failed: {}", e))?;
-        let rows = stmt.query_map(rusqlite::params![limit as i32], |row| {
+
+        // Bind search terms as %term% patterns, then limit
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = terms.iter()
+            .map(|t| Box::new(format!("%{}%", t)) as Box<dyn rusqlite::types::ToSql>)
+            .collect();
+        params.push(Box::new(limit as i32));
+
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
             let uuid: String = row.get(0)?;
             let parent: Option<String> = row.get(3)?;
             let display_parent = parent.filter(|p| p != &uuid);
