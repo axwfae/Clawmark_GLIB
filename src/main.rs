@@ -121,6 +121,7 @@ fn run(cli: Cli) -> Result<String, String> {
             }
 
             let db = get_db()?;
+            let backend = embedding::create_backend()?;
             let prefix = gist_prefix.as_deref().unwrap_or("");
             let mut created = 0usize;
             let mut errors = 0usize;
@@ -150,7 +151,7 @@ fn run(cli: Cli) -> Result<String, String> {
                             None => format!("{}capture: {} (section {})", prefix, filename, i + 1),
                         };
                         let parent = root_uuid.as_deref();
-                        match db.signal(&section.content, Some(&gist), parent, None) {
+                        match db.signal_with_backend(&section.content, Some(&gist), parent, None, Some(backend.as_ref())) {
                             Ok(short_uuid) => {
                                 if root_uuid.is_none() { root_uuid = Some(short_uuid); }
                                 created += 1;
@@ -163,7 +164,7 @@ fn run(cli: Cli) -> Result<String, String> {
                     }
                 } else {
                     let gist = format!("{}capture: {}", prefix, filename);
-                    match db.signal(content, Some(&gist), None, None) {
+                    match db.signal_with_backend(content, Some(&gist), None, None, Some(backend.as_ref())) {
                         Ok(_) => { created += 1; }
                         Err(e) => {
                             eprintln!("[capture] Failed: {}", e);

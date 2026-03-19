@@ -49,9 +49,19 @@ impl DatabaseManager {
     // =========================================================================
 
     /// Insert a signal with optional gist and parent. Returns short UUID.
+    /// Embeds content inline if no backend is provided (creates one per call).
     pub fn signal(
         &self, content: &str, gist: Option<&str>, parent: Option<&str>,
         created_at: Option<&str>,
+    ) -> Result<String, String> {
+        self.signal_with_backend(content, gist, parent, created_at, None)
+    }
+
+    /// Insert a signal, optionally reusing a pre-created embedding backend.
+    pub fn signal_with_backend(
+        &self, content: &str, gist: Option<&str>, parent: Option<&str>,
+        created_at: Option<&str>,
+        backend: Option<&dyn crate::embedding::EmbeddingBackend>,
     ) -> Result<String, String> {
         if content.trim().is_empty() {
             return Err("Content cannot be empty".to_string());
@@ -91,9 +101,15 @@ impl DatabaseManager {
         }
 
         // Best-effort embedding cache
-        match crate::embedding::embed_content(content) {
-            Ok(emb) => { let _ = self.cache_embedding(&uuid, &emb); }
-            Err(_) => {}
+        if let Some(b) = backend {
+            if let Ok(emb) = b.embed(content) {
+                let _ = self.cache_embedding(&uuid, &emb);
+            }
+        } else {
+            match crate::embedding::embed_content(content) {
+                Ok(emb) => { let _ = self.cache_embedding(&uuid, &emb); }
+                Err(_) => {}
+            }
         }
 
         Ok(uuid[..8].to_string())
