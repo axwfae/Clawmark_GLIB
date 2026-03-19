@@ -1,0 +1,115 @@
+use clap::{Parser, Subcommand};
+
+#[derive(Parser)]
+#[command(
+    name = "relay-for-claw",
+    version,
+    about = "Persistent memory for OpenClaw agents",
+    long_about = "RELAY-FOR-CLAW: Persistent memory for OpenClaw agents.\n\nReplace markdown grep with semantic search.\nYour agent remembers across sessions.",
+    after_help = "Examples:\n  relay-for-claw migrate ~/.openclaw/workspace    Import OpenClaw memory\n  relay-for-claw signal -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  relay-for-claw tune \"auth\"                       Semantic search\n  relay-for-claw tune --recent                     Latest signals\n  relay-for-claw backfill                          Build embedding cache\n\nTip: Run 'relay-for-claw migrate' first to import your existing OpenClaw memory.\n\nUse \"relay-for-claw [command] --help\" for more information."
+)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Command,
+}
+
+impl Cli {
+    pub fn build() -> clap::Command {
+        let cmd = <Self as clap::CommandFactory>::command();
+        let styles = clap::builder::styling::Styles::plain();
+        let mut cmd = cmd.styles(styles.clone()).disable_version_flag(true);
+        for sub in cmd.get_subcommands_mut() {
+            *sub = sub.clone().styles(styles.clone());
+        }
+        cmd.arg(
+            clap::Arg::new("version")
+                .short('v').long("version")
+                .action(clap::ArgAction::Version)
+                .help("Show version information")
+        )
+    }
+}
+
+#[derive(Subcommand)]
+pub enum Command {
+    /// Import OpenClaw memory into a relay station
+    #[command(
+        after_help = "Examples:\n  relay-for-claw migrate                             Auto-detect workspace\n  relay-for-claw migrate ~/.openclaw/workspace       Specify path\n  relay-for-claw migrate --dry-run                   Preview without importing\n\nImports MEMORY.md and memory/YYYY-MM-DD.md files as signals.\nTimestamps preserved. Daily logs split by ## headers into threaded signals."
+    )]
+    Migrate {
+        /// Path to OpenClaw workspace (default: ~/.openclaw/workspace)
+        path: Option<String>,
+
+        /// Preview what would be imported without writing
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Transmit a signal to your station
+    #[command(
+        arg_required_else_help = true,
+        after_help = "Examples:\n  relay-for-claw signal -c \"Fixed the auth bug\"\n  relay-for-claw signal -c \"Token refresh order\" -g \"fix: auth token refresh\"\n  relay-for-claw signal -c @notes.md -g \"session: review\"\n  echo \"content\" | relay-for-claw signal -c - -g \"piped: from process\"\n\nTip: The gist is how future agents find this signal. Write for them."
+    )]
+    Signal {
+        /// Content to transmit
+        #[arg(short, long)]
+        content: String,
+
+        /// Compressed insight — how future agents find this
+        #[arg(short, long)]
+        gist: Option<String>,
+
+        /// Thread to a parent signal (UUID prefix)
+        #[arg(short, long)]
+        parent: Option<String>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Search your station — semantic by default
+    #[command(
+        after_help = "Examples:\n  relay-for-claw tune \"auth token\"                  Semantic search\n  relay-for-claw tune --keyword \"auth\"               Keyword fallback\n  relay-for-claw tune --recent                       Latest signals\n  relay-for-claw tune --random                       Discover something\n  relay-for-claw tune --full \"auth\"                   Include full content\n\nTip: Run 'relay-for-claw backfill' first to enable semantic search."
+    )]
+    Tune {
+        /// Search query
+        query: Option<String>,
+
+        /// Show recent signals
+        #[arg(long, conflicts_with_all = ["random"])]
+        recent: bool,
+
+        /// Discover a random signal
+        #[arg(long, conflicts_with_all = ["recent"])]
+        random: bool,
+
+        /// Force keyword search (skip semantic)
+        #[arg(short, long)]
+        keyword: bool,
+
+        /// Include full content
+        #[arg(short, long)]
+        full: bool,
+
+        /// Max results
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Build embedding cache for semantic search
+    #[command(
+        after_help = "Embeds all signal content using ONNX (paraphrase-multilingual-MiniLM-L12-v2).\nFirst run downloads the model (~118MB). Subsequent runs only process new signals."
+    )]
+    Backfill,
+
+    /// Show usage guide for agents
+    Skill,
+
+    /// Show station stats
+    Status,
+}

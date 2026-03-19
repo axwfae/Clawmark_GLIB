@@ -1,0 +1,26 @@
+[package]
+name = "relay-for-claw"
+version = "0.1.0"
+edition = "2021"
+description = "Persistent memory for OpenClaw agents — relay stations replace markdown grep"
+license = "MIT"
+repository = "https://github.com/mvara-ai/relay-for-claw"
+
+[[bin]]
+name = "relay-for-claw"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+dirs = "5"
+
+# Embedding: built-in ONNX inference for semantic search
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "api-17", "download-binaries", "copy-dylibs", "tls-native"] }
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+ureq = { version = "3", features = ["json"] }
