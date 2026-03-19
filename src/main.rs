@@ -48,15 +48,72 @@ fn run(cli: Cli) -> Result<String, String> {
             Ok(include_str!("../skills/SKILL.md").to_string())
         }
 
-        Command::Migrate { path, dry_run } => {
-            let ws_path = path.map(PathBuf::from)
-                .unwrap_or_else(default_claw_workspace);
+        Command::Capture { paths, openclaw, split, gist_prefix, dry_run } => {
+            // OpenClaw mode: use the adapter
+            if let Some(oc_path) = openclaw {
+                let ws_path = oc_path.map(PathBuf::from)
+                    .unwrap_or_else(default_claw_workspace);
 
-            let workspace = adapter::detect_workspace(&ws_path)
-                .ok_or_else(|| format!("No OpenClaw workspace found at {}\nExpected MEMORY.md or memory/ directory.", ws_path.display()))?;
+                let workspace = adapter::detect_workspace(&ws_path)
+                    .ok_or_else(|| format!("No OpenClaw workspace found at {}\nExpected MEMORY.md or memory/ directory.", ws_path.display()))?;
 
-            let summary = adapter::workspace_summary(&workspace);
-            println!("{}", summary);
+                let summary = adapter::workspace_summary(&workspace);
+                println!("{}", summary);
+
+                if dry_run {
+                    println!("\n--dry-run: no changes made.");
+                    return Ok(String::new());
+                }
+
+                let db = get_db()?;
+                let (created, errors) = adapter::migrate(&workspace, &db)?;
+
+                let mut lines = vec![
+                    format!("\n✅ Captured: {} signals from OpenClaw workspace", created),
+                ];
+                if errors > 0 {
+                    lines.push(format!("⚠️  {} errors (see above)", errors));
+                }
+                lines.push("Run 'clawmark backfill' to enable semantic search.".to_string());
+                return Ok(lines.join("\n"));
+            }
+
+            // General mode: capture files and directories
+            if paths.is_empty() {
+                return Err("No files specified. Use 'clawmark capture <files...>' or 'clawmark capture --openclaw'.".to_string());
+            }
+
+            let mut files: Vec<PathBuf> = Vec::new();
+            for p in &paths {
+                let path = PathBuf::from(p);
+                if path.is_dir() {
+                    match std::fs::read_dir(&path) {
+                        Ok(entries) => {
+                            for entry in entries.flatten() {
+                                let ep = entry.path();
+                                if ep.extension().map(|e| e == "md").unwrap_or(false) {
+                                    files.push(ep);
+                                }
+                            }
+                        }
+                        Err(e) => eprintln!("[capture] Failed to read directory {}: {}", path.display(), e),
+                    }
+                } else if path.is_file() {
+                    files.push(path);
+                } else {
+                    eprintln!("[capture] Not found: {}", path.display());
+                }
+            }
+            files.sort();
+
+            if files.is_empty() {
+                return Err("No files found to capture.".to_string());
+            }
+
+            println!("[capture] {} file(s) to process", files.len());
+            for f in &files {
+                println!("  {}", f.display());
+            }
 
             if dry_run {
                 println!("\n--dry-run: no changes made.");
@@ -64,10 +121,60 @@ fn run(cli: Cli) -> Result<String, String> {
             }
 
             let db = get_db()?;
-            let (created, errors) = adapter::migrate(&workspace, &db)?;
+            let prefix = gist_prefix.as_deref().unwrap_or("");
+            let mut created = 0usize;
+            let mut errors = 0usize;
+
+            for file_path in &files {
+                let content = match std::fs::read_to_string(file_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("[capture] Failed to read {}: {}", file_path.display(), e);
+                        errors += 1;
+                        continue;
+                    }
+                };
+                let content = content.trim();
+                if content.is_empty() { continue; }
+
+                let filename = file_path.file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+
+                if split {
+                    let sections = adapter::split_sections(content);
+                    let mut root_uuid: Option<String> = None;
+                    for (i, section) in sections.iter().enumerate() {
+                        let gist = match &section.header {
+                            Some(h) => format!("{}capture: {} — {}", prefix, filename, h),
+                            None => format!("{}capture: {} (section {})", prefix, filename, i + 1),
+                        };
+                        let parent = root_uuid.as_deref();
+                        match db.signal(&section.content, Some(&gist), parent, None) {
+                            Ok(short_uuid) => {
+                                if root_uuid.is_none() { root_uuid = Some(short_uuid); }
+                                created += 1;
+                            }
+                            Err(e) => {
+                                eprintln!("[capture] Failed: {}", e);
+                                errors += 1;
+                            }
+                        }
+                    }
+                } else {
+                    let gist = format!("{}capture: {}", prefix, filename);
+                    match db.signal(content, Some(&gist), None, None) {
+                        Ok(_) => { created += 1; }
+                        Err(e) => {
+                            eprintln!("[capture] Failed: {}", e);
+                            errors += 1;
+                        }
+                    }
+                }
+            }
 
             let mut lines = vec![
-                format!("\n✅ Migration complete: {} signals created", created),
+                format!("\n✅ Captured: {} signals from {} file(s)", created, files.len()),
             ];
             if errors > 0 {
                 lines.push(format!("⚠️  {} errors (see above)", errors));

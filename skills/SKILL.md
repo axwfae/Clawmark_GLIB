@@ -6,7 +6,8 @@ Persistent memory for AI agents. Works with any framework — OpenClaw, Claude C
 
 ```bash
 clawmark signal -c "First signal" -g "setup: ready"   # start using immediately
-clawmark migrate                                       # (optional) import OpenClaw memory
+clawmark capture --openclaw                            # (optional) import OpenClaw memory
+clawmark capture ./docs/                               # bulk-load any markdown files
 clawmark backfill                                      # embed any un-cached signals
 ```
 

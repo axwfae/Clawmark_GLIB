@@ -165,13 +165,13 @@ pub fn migrate(
     Ok((created, errors))
 }
 
-struct Section {
-    header: Option<String>,
-    content: String,
+pub struct Section {
+    pub header: Option<String>,
+    pub content: String,
 }
 
 /// Split markdown content by ## headers into sections
-fn split_sections(content: &str) -> Vec<Section> {
+pub fn split_sections(content: &str) -> Vec<Section> {
     let mut sections = Vec::new();
     let mut current = String::new();
     let mut current_header: Option<String> = None;
