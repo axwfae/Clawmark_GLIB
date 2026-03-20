@@ -64,8 +64,27 @@ fi
 
 # Extract and install
 mkdir -p "$INSTALL_DIR"
-tar xzf "$TMPDIR/clawmark.tar.gz" -C "$INSTALL_DIR"
+tar xzf "$TMPDIR/clawmark.tar.gz" -C "$TMPDIR/extract"
+cp "$TMPDIR/extract/clawmark" "$INSTALL_DIR/"
 chmod +x "${INSTALL_DIR}/clawmark"
+
+# Install bundled libonnxruntime if present (ARM64 Linux)
+if [ -f "$TMPDIR/extract/libonnxruntime.so.1.22.0" ]; then
+  LIB_DIR="${INSTALL_DIR}/../lib"
+  mkdir -p "$LIB_DIR"
+  cp "$TMPDIR/extract/libonnxruntime.so.1.22.0" "$LIB_DIR/"
+  ln -sf libonnxruntime.so.1.22.0 "$LIB_DIR/libonnxruntime.so"
+  # Wrapper script to set LD_LIBRARY_PATH
+  mv "${INSTALL_DIR}/clawmark" "${INSTALL_DIR}/clawmark.bin"
+  cat > "${INSTALL_DIR}/clawmark" <<'WRAPPER'
+#!/bin/sh
+DIR="$(cd "$(dirname "$0")" && pwd)"
+export LD_LIBRARY_PATH="${DIR}/../lib:${LD_LIBRARY_PATH}"
+exec "${DIR}/clawmark.bin" "$@"
+WRAPPER
+  chmod +x "${INSTALL_DIR}/clawmark"
+  echo "  Bundled ONNX Runtime installed."
+fi
 
 # Verify
 if "${INSTALL_DIR}/clawmark" --version > /dev/null 2>&1; then
