@@ -64,6 +64,9 @@ fn main() {
             Ok((mut stream, _)) => {
                 last_activity = Instant::now();
 
+                // Set read timeout so a stalled client can't hang the server
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+
                 // Read u32 LE length prefix
                 let mut len_buf = [0u8; 4];
                 if stream.read_exact(&mut len_buf).is_err() { continue; }
@@ -102,7 +105,11 @@ fn main() {
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
-            Err(_) => break,
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => {
+                eprintln!("[clawmark-embed] Fatal accept error: {}", e);
+                break;
+            }
         }
     }
 

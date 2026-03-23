@@ -15,29 +15,43 @@ pub fn embed_via_socket(text: &str) -> Option<Vec<f32>> {
     let socket_path = std::env::var("CLAWMARK_EMBED_SOCKET")
         .unwrap_or_else(|_| DEFAULT_SOCKET.to_string());
 
-    if !Path::new(&socket_path).exists() {
-        // Try auto-spawning if configured
-        if std::env::var("CLAWMARK_EMBED_SPAWN").ok().as_deref() == Some("1") {
-            spawn_server(&socket_path);
-        } else {
-            return None;
+    if Path::new(&socket_path).exists() {
+        // Socket file exists — try connecting. If it fails, it's stale.
+        match UnixStream::connect(&socket_path) {
+            Ok(s) => {
+                s.set_read_timeout(Some(std::time::Duration::from_secs(2))).ok()?;
+                // Connected — use this stream below
+                return embed_on_stream(s, text);
+            }
+            Err(_) => {
+                // Stale socket — remove it
+                let _ = std::fs::remove_file(&socket_path);
+            }
         }
     }
 
-    let mut stream = UnixStream::connect(&socket_path).ok()?;
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(30))).ok()?;
+    // No socket (or stale socket removed) — try auto-spawning
+    if std::env::var("CLAWMARK_EMBED_SPAWN").ok().as_deref() == Some("1") {
+        spawn_server(&socket_path);
+    } else {
+        return None;
+    }
 
-    // Send: u32 LE length + UTF-8 text
+    let stream = UnixStream::connect(&socket_path).ok()?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).ok()?;
+    embed_on_stream(stream, text)
+}
+
+/// Send text over a connected stream, receive embedding back
+fn embed_on_stream(mut stream: UnixStream, text: &str) -> Option<Vec<f32>> {
     let text_bytes = text.as_bytes();
     let len = text_bytes.len() as u32;
     stream.write_all(&len.to_le_bytes()).ok()?;
     stream.write_all(text_bytes).ok()?;
 
-    // Receive: 1536 bytes (384 × f32 LE)
     let mut buf = vec![0u8; EMBEDDING_BYTES];
     stream.read_exact(&mut buf).ok()?;
 
-    // Check for zero vector (error response)
     let is_zero = buf.iter().all(|&b| b == 0);
     if is_zero { return None; }
 
