@@ -2,9 +2,28 @@
 
 **Continuity for AI agents.**
 
-Your agent solves problems, makes decisions, learns things. Then the session ends. Next session — blank slate. You explain the same architecture decision for the third time. You re-debug the same issue. The agent is capable. It just can't remember.
+Your agent solves problems, makes decisions, learns things. Then the session ends. Next session — blank slate. Clawmark fixes that.
 
-Clawmark gives your agent a place to put what it learned, and a way to find it again. Semantic search, not grep. Threaded signals, not flat files. Works across sessions, compactions, and substrates.
+## Quick start
+
+```bash
+# Install (Mac, Linux, Intel Mac, Raspberry Pi)
+curl -fsSL https://raw.githubusercontent.com/jackccrawford/clawmark/main/install.sh | bash
+
+# Save something
+clawmark signal -c "Token validation must run after refresh. Lines 42-47 in auth.rs." -g "fix: auth token refresh order"
+
+# Find it later — by meaning, not keywords
+clawmark tune "authentication middleware"
+```
+
+That's it. One binary, one SQLite file, semantic search. No API key, no account, no cloud.
+
+---
+
+## How it actually works
+
+Your agent searches "authentication middleware" and finds a signal about "token validation" — because the **meaning** overlaps, even though the words don't. That's BERT-based semantic search running locally in a single binary.
 
 ```
 $ clawmark signal -c "Token validation must run after refresh, not before. Lines 42-47 in auth.rs." -g "fix: auth token refresh order"
@@ -75,24 +94,26 @@ No runtime dependency. No API key. No account. One 31MB binary.
 
 ## Install
 
-**Mac (Apple Silicon) / Linux (Ubuntu 24+):**
+**Recommended (Mac, Linux, Intel Mac, Raspberry Pi):**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jackccrawford/clawmark/main/install.sh | bash
 ```
 
-**From source (any platform):**
+The installer detects your platform, downloads the right binary, bundles the ONNX runtime if needed, and symlinks to your PATH. Verified on Apple Silicon, Intel Mac, Ubuntu 24+, Raspberry Pi 5, and Debian Bookworm.
 
-```bash
-cargo install clawmark
-```
-
-**Raspberry Pi / Debian Bookworm** (requires system ONNX Runtime):
+**From source:**
 
 ```bash
 git clone https://github.com/jackccrawford/clawmark && cd clawmark
-ORT_LIB_LOCATION=/usr/local/lib ORT_PREFER_DYNAMIC_LINK=1 cargo build --release
+cargo build --release
 cp target/release/clawmark ~/.local/bin/
+```
+
+On platforms without prebuilt ONNX Runtime (Raspberry Pi, some Linux):
+
+```bash
+ORT_LIB_LOCATION=/usr/local/lib ORT_PREFER_DYNAMIC_LINK=1 cargo build --release
 ```
 
 ## What it looks like
@@ -222,52 +243,6 @@ Clawmark runs as a separate process — the agent calls it, gets results, moves 
 - **Runs on anything.** Pi 4, Pi 5, Mac, Linux server. Single static binary.
 - **Framework-independent.** Your memory is in SQLite, not in any framework's format. Switch tools, keep your signals.
 
-## Fast mode: clawmark-embed
-
-Every `clawmark signal` loads the ONNX model, embeds the content, and exits. On a Mac that's 700ms. On a Raspberry Pi, 1.6 seconds. Every signal.
-
-`clawmark-embed` fixes this. It's a background process that holds the model in memory and serves embeddings over a Unix socket. The first signal pays the load cost. Every signal after that is instant.
-
-```
-$ clawmark-embed &               # start the server (auto-exits after 5 min idle)
-$ clawmark signal -c "first"     # 1.6s (model loads)
-$ clawmark signal -c "second"    # 0.04s (model already warm)
-$ clawmark signal -c "third"     # 0.04s
-```
-
-| | Mac (Apple Silicon) | Raspberry Pi 5 |
-|---|---|---|
-| Without embed server | 712ms | 1,580ms |
-| With embed server | 109ms | **40ms** |
-| Speedup | 6.5x | **39.5x** |
-
-The slower the hardware, the bigger the win. No configuration — `clawmark signal` checks for the socket automatically. If the server isn't running, it falls back to loading the model inline. Zero setup, zero risk.
-
-```bash
-# Start it
-clawmark-embed &
-
-# Or with custom idle timeout (default 300s)
-CLAWMARK_EMBED_IDLE=600 clawmark-embed &
-
-# It auto-exits when idle. No stale processes.
-```
-
-## Build from source
-
-```bash
-git clone https://github.com/jackccrawford/clawmark
-cd clawmark
-cargo build --release
-cp target/release/clawmark ~/.clawmark/bin/clawmark
-```
-
-On Raspberry Pi or Linux with system ONNX Runtime:
-
-```bash
-ORT_LIB_LOCATION=/usr/local/lib ORT_PREFER_DYNAMIC_LINK=1 cargo build --release
-```
-
 ## For agents
 
 _This section is for you — the one reading this README._
@@ -314,6 +289,26 @@ clawmark signal -c "Same fix needed in staging" -g "fix: staging auth ordering" 
 ```
 
 Threads are conversations. A flat list of unconnected signals is a junk drawer.
+
+## Performance: clawmark-embed
+
+Every `clawmark signal` loads the ONNX model, embeds the content, and exits. On a Mac that's 700ms. On a Raspberry Pi, 1.6 seconds.
+
+`clawmark-embed` is an optional background process that holds the model in memory. The first signal pays the load cost. Every signal after that is instant.
+
+```bash
+clawmark-embed &               # start (auto-exits after 5 min idle)
+clawmark signal -c "first"     # 1.6s (model loads)
+clawmark signal -c "second"    # 0.04s (model warm)
+```
+
+| | Mac (Apple Silicon) | Raspberry Pi 5 |
+|---|---|---|
+| Without embed server | 712ms | 1,580ms |
+| With embed server | 109ms | **40ms** |
+| Speedup | 6.5x | **39.5x** |
+
+No configuration needed — `clawmark signal` checks for the socket automatically. If the server isn't running, it loads the model inline. Zero setup, zero risk.
 
 ## License
 
