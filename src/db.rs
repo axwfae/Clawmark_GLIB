@@ -87,30 +87,42 @@ impl DatabaseManager {
             uuid.clone()
         };
 
+        // Embed content first (before touching the database)
+        let embedding = if let Some(b) = backend {
+            match b.embed(content) {
+                Ok(emb) => Some(emb),
+                Err(e) => { eprintln!("[clawmark] Embedding failed for {}: {}", &uuid[..8], e); None }
+            }
+        } else {
+            match clawmark::embedding::embed_content(content) {
+                Ok(emb) => Some(emb),
+                Err(e) => { eprintln!("[clawmark] Embedding failed for {}: {}", &uuid[..8], e); None }
+            }
+        };
+
+        // Insert signal + embedding in one transaction
         let conn = self.conn()?;
+        let tx = conn.unchecked_transaction()
+            .map_err(|e| format!("Failed to begin transaction: {}", e))?;
         if let Some(ts) = created_at {
-            conn.execute(
+            tx.execute(
                 "INSERT INTO signals (signal_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, ?3, ?4)",
                 rusqlite::params![&uuid, &payload_str, ts, &parent_uuid],
             ).map_err(|e| format!("Failed to insert: {}", e))?;
         } else {
-            conn.execute(
+            tx.execute(
                 "INSERT INTO signals (signal_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, datetime('now', 'utc'), ?3)",
                 rusqlite::params![&uuid, &payload_str, &parent_uuid],
             ).map_err(|e| format!("Failed to insert: {}", e))?;
         }
-
-        // Best-effort embedding cache
-        if let Some(b) = backend {
-            if let Ok(emb) = b.embed(content) {
-                let _ = self.cache_embedding(&uuid, &emb);
-            }
-        } else {
-            match clawmark::embedding::embed_content(content) {
-                Ok(emb) => { let _ = self.cache_embedding(&uuid, &emb); }
-                Err(_) => {}
-            }
+        if let Some(ref emb) = embedding {
+            let blob = clawmark::embedding::embedding_to_blob(emb);
+            tx.execute(
+                "INSERT OR REPLACE INTO signal_embeddings (signal_uuid, embedding) VALUES (?1, ?2)",
+                rusqlite::params![&uuid, blob],
+            ).map_err(|e| format!("Failed to cache embedding: {}", e))?;
         }
+        tx.commit().map_err(|e| format!("Failed to commit: {}", e))?;
 
         Ok(uuid[..8].to_string())
     }
@@ -267,13 +279,22 @@ impl DatabaseManager {
 
         let rows = stmt.query_map([], |row| {
             let blob: Vec<u8> = row.get(3)?;
-            Ok(clawmark::embedding::CachedEmbedding {
-                signal_uuid: row.get(0)?, gist: row.get(1)?,
-                created_at: row.get(2)?, embedding: clawmark::embedding::blob_to_embedding(&blob),
-            })
+            let uuid: String = row.get(0)?;
+            match clawmark::embedding::blob_to_embedding(&blob) {
+                Ok(embedding) => Ok(Some(clawmark::embedding::CachedEmbedding {
+                    signal_uuid: uuid, gist: row.get(1)?,
+                    created_at: row.get(2)?, embedding,
+                })),
+                Err(e) => {
+                    eprintln!("[clawmark] Skipping corrupted embedding for {}: {}", &uuid[..8.min(uuid.len())], e);
+                    Ok(None)
+                }
+            }
         }).map_err(|e| format!("Query failed: {}", e))?;
 
-        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+        rows.collect::<Result<Vec<_>, _>>()
+            .map(|v| v.into_iter().flatten().collect())
+            .map_err(|e| e.to_string())
     }
 
     pub fn get_uncached_signals(&self) -> Result<Vec<(String, String)>, String> {

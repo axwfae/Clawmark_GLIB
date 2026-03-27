@@ -55,7 +55,7 @@ fn embed_on_stream(mut stream: UnixStream, text: &str) -> Option<Vec<f32>> {
     let is_zero = buf.iter().all(|&b| b == 0);
     if is_zero { return None; }
 
-    Some(crate::embedding::blob_to_embedding(&buf))
+    crate::embedding::blob_to_embedding(&buf).ok()
 }
 
 /// Try to spawn clawmark-embed in background

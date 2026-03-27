@@ -211,7 +211,17 @@ pub fn create_backend() -> Result<Box<dyn EmbeddingBackend>, String> {
         Ok(b) => Ok(Box::new(b)),
         Err(e) => {
             eprintln!("[clawmark] ONNX failed ({}), falling back to ollama", e);
-            Ok(Box::new(OllamaBackend::new()))
+            let backend = OllamaBackend::new();
+            // Verify ollama is reachable before claiming ready
+            let agent = ureq::Agent::config_builder()
+                .timeout_global(Some(std::time::Duration::from_secs(2)))
+                .build()
+                .new_agent();
+            let tags_url = backend.url.replace("/api/embeddings", "/api/tags");
+            match agent.get(&tags_url).call() {
+                Ok(_) => Ok(Box::new(backend)),
+                Err(_) => Err("Neither built-in ONNX nor Ollama available for embeddings".to_string()),
+            }
         }
     }
 }
@@ -277,8 +287,15 @@ pub fn embedding_to_blob(embedding: &[f32]) -> Vec<u8> {
     blob
 }
 
-pub fn blob_to_embedding(blob: &[u8]) -> Vec<f32> {
-    blob.chunks_exact(4)
+pub fn blob_to_embedding(blob: &[u8]) -> Result<Vec<f32>, String> {
+    let expected_bytes = EMBEDDING_DIM * 4;
+    if blob.len() != expected_bytes {
+        return Err(format!(
+            "Corrupted embedding: expected {} bytes ({}×4), got {}",
+            expected_bytes, EMBEDDING_DIM, blob.len()
+        ));
+    }
+    Ok(blob.chunks_exact(4)
         .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect()
+        .collect())
 }
