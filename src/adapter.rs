@@ -1,23 +1,20 @@
 //! OpenClaw memory adapter — reads markdown memory files, migrates to clawmark signals
 //!
-//! Also supports PicoClaw format:
-//!   - workspace/memory/*.md (all .md files, no date restriction)
+//! Reads:
+//!   - MEMORY.md (curated long-term memory)
+//!   - memory/YYYY-MM-DD.md (daily logs)
+//!   - memory.md (fallback if MEMORY.md absent)
 //!
 //! Each file becomes one or more signals with preserved timestamps.
 
 use std::path::{Path, PathBuf};
 use regex::Regex;
 
-fn is_valid_date(s: &str) -> bool {
-    Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap().is_match(s)
-}
-
 /// Discovered OpenClaw workspace
 pub struct ClawWorkspace {
     pub path: PathBuf,
     pub memory_md: Option<PathBuf>,
     pub daily_files: Vec<DailyFile>,
-    pub is_picoclaw: bool,
 }
 
 pub struct DailyFile {
@@ -26,54 +23,43 @@ pub struct DailyFile {
 }
 
 /// Detect an OpenClaw workspace at the given path
-/// OpenClaw: path = workspace/ → scan MEMORY.md + memory/YYYY-MM-DD.md
-/// PicoClaw: path = workspace/ → scan memory/*.md (all .md files)
-pub fn detect_workspace(path: &Path, is_picoclaw: bool) -> Option<ClawWorkspace> {
-    // OpenClaw: check for MEMORY.md
-    let has_memory_md = if is_picoclaw {
-        false // PicoClaw doesn't need MEMORY.md
-    } else {
-        path.join("MEMORY.md").exists()
-    };
+pub fn detect_workspace(path: &Path) -> Option<ClawWorkspace> {
+    // Look for telltale OpenClaw files
+    let has_agents_md = path.join("AGENTS.md").exists()
+        || path.join("agents.md").exists();
+    let has_soul_md = path.join("SOUL.md").exists()
+        || path.join("soul.md").exists();
+    let has_memory_dir = path.join("memory").is_dir();
+    let has_memory_md = path.join("MEMORY.md").exists()
+        || path.join("memory.md").exists();
 
-    // Scan memory/ subdirectory
-    let memory_dir = path.join("memory");
-    let has_memory_dir = memory_dir.is_dir();
-
-    // OpenClaw: need memory/ dir OR MEMORY.md
-    // PicoClaw: only need memory/ dir
-    if !has_memory_dir && (!is_picoclaw && !has_memory_md) {
+    // Need at least one memory source and one identity file
+    if !has_memory_dir && !has_memory_md {
         return None;
     }
+    if !has_agents_md && !has_soul_md {
+        // Could still be a workspace with just memory files
+    }
 
-    let memory_md = if has_memory_md {
+    let memory_md = if path.join("MEMORY.md").exists() {
         Some(path.join("MEMORY.md"))
+    } else if path.join("memory.md").exists() {
+        Some(path.join("memory.md"))
     } else {
         None
     };
 
     let mut daily_files = Vec::new();
     if has_memory_dir {
-        if let Ok(entries) = std::fs::read_dir(&memory_dir) {
+        let date_re = Regex::new(r"^(\d{4}-\d{2}-\d{2})\.md$").unwrap();
+        if let Ok(entries) = std::fs::read_dir(path.join("memory")) {
             for entry in entries.flatten() {
-                let p = entry.path();
-                if p.extension().map(|e| e == "md").unwrap_or(false) {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    // OpenClaw: only YYYY-MM-DD.md files
-                    // PicoClaw: any .md file
-                    let date_re = Regex::new(r"^(\d{4}-\d{2}-\d{2})\.md$").unwrap();
-                    if let Some(caps) = date_re.captures(&name) {
-                        daily_files.push(DailyFile {
-                            path: p,
-                            date: caps[1].to_string(),
-                        });
-                    } else if is_picoclaw {
-                        // PicoClaw: use filename as date
-                        daily_files.push(DailyFile {
-                            path: p,
-                            date: name.trim_end_matches(".md").to_string(),
-                        });
-                    }
+                let name = entry.file_name().to_string_lossy().to_string();
+                if let Some(caps) = date_re.captures(&name) {
+                    daily_files.push(DailyFile {
+                        path: entry.path(),
+                        date: caps[1].to_string(),
+                    });
                 }
             }
         }
@@ -134,17 +120,9 @@ pub fn migrate(
 
                 if sections.len() <= 1 {
                     // Single signal for the whole file
-                    let gist = if workspace.is_picoclaw {
-                        format!("picoclaw: {}", daily.date)
-                    } else {
-                        format!("openclaw-daily: {}", daily.date)
-                    };
-                    let ts = if workspace.is_picoclaw || !is_valid_date(&daily.date) {
-                        None
-                    } else {
-                        Some(format!("{}T23:59:59", daily.date))
-                    };
-                    match db.signal(content, Some(&gist), None, ts.as_deref()) {
+                    let gist = format!("openclaw-daily: {}", daily.date);
+                    let ts = format!("{}T23:59:59", daily.date);
+                    match db.signal(content, Some(&gist), None, Some(&ts)) {
                         Ok(_) => { created += 1; }
                         Err(e) => {
                             eprintln!("[migrate] Failed to migrate {}: {}", daily.date, e);
@@ -156,18 +134,12 @@ pub fn migrate(
                     let mut root_uuid: Option<String> = None;
                     for (i, section) in sections.iter().enumerate() {
                         let gist = match &section.header {
-                            Some(h) if workspace.is_picoclaw => format!("picoclaw: {} — {}", daily.date, h),
                             Some(h) => format!("openclaw-daily: {} — {}", daily.date, h),
-                            None if workspace.is_picoclaw => format!("picoclaw: {} (section {})", daily.date, i + 1),
                             None => format!("openclaw-daily: {} (section {})", daily.date, i + 1),
                         };
-                        let ts = if workspace.is_picoclaw || !is_valid_date(&daily.date) {
-                            None
-                        } else {
-                            Some(format!("{}T{:02}:00:00", daily.date, (i * 2).min(23)))
-                        };
+                        let ts = format!("{}T{:02}:00:00", daily.date, (i * 2).min(23));
                         let parent = root_uuid.as_deref();
-                        match db.signal(&section.content, Some(&gist), parent, ts.as_deref()) {
+                        match db.signal(&section.content, Some(&gist), parent, Some(&ts)) {
                             Ok(short_uuid) => {
                                 if root_uuid.is_none() {
                                     // First section becomes the thread root — resolve full UUID
@@ -249,5 +221,5 @@ pub fn workspace_summary(ws: &ClawWorkspace) -> String {
         }
     }
 
-lines.join("\n")
+    lines.join("\n")
 }
