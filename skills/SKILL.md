@@ -132,7 +132,7 @@ Path: `~/.picoclaw/workspace/memory/`
 .picoclaw/
 └── workspace/
     └── memory/            # All .md files here
-        ├── notes.md
+        ├── MEMORY.md
         ├── 2024-01-01.md
         └── ...
 ```
