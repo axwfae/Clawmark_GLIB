@@ -3,10 +3,10 @@
 # $ORIGIN = the directory containing the binary itself.
 
 [target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "link-args=-Wl,-rpath,$ORIGIN/lib"]
+rustflags = ["-C", "link-args=-Wl,-rpath,$ORIGIN:$ORIGIN/lib:$ORIGIN/../lib"]
 
 [target.aarch64-unknown-linux-gnu]
-rustflags = ["-C", "link-args=-Wl,-rpath,$ORIGIN/lib"]
+rustflags = ["-C", "link-args=-Wl,-rpath,$ORIGIN:$ORIGIN/lib:$ORIGIN/../lib"]
 
 [target.aarch64-apple-darwin]
-rustflags = ["-C", "link-args=-Wl,-rpath,@loader_path/lib"]
+rustflags = ["-C", "link-args=-Wl,-rpath,@loader_path:@loader_path/lib:@loader_path/../lib"]
