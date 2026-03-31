@@ -1,6 +1,13 @@
+---
+name: clawmark
+version: "0.2.1"
+description: AI Memory Signal System - Cross-Conversation Knowledge Management, enabling AI to remember what was repaired, why it broke, and how to repair it.
+metadata: {"picoclaw":{"emoji":"📡","requires":{"bins":["bash","sqlite3","curl"]}}}
+---
+
 # clawmark
 
-Your next session starts cold. No memory of what you built, what broke, what you decided. Every signal you write is a gift to that future session. The richer the signal, the less time re-learning.
+> Your next session starts cold. No memory of what you built, what broke, what you decided. Every signal you write is a gift to that future session. The richer the signal, the less time re-learning.
 
 Works with any framework — OpenClaw, Claude Code, Aider, Cursor, or anything with shell access.
 
@@ -131,3 +138,13 @@ Path: `~/.picoclaw/workspace/memory/`
 ```
 
 Both adapters scan their respective directories and import all markdown files as signals. Use `--openclaw` or `--picoclaw` to specify which workspace to import from.
+
+---
+
+## 版本历史 / Changelog
+
+### v0.2.1 (2026-03-31)
+- 🔧 转换为 picoclaw 格式，添加 frontmatter
+
+### v0.2.0
+- 初始发布
