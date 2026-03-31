@@ -71,7 +71,7 @@ fn run(cli: Cli) -> Result<String, String> {
                 let ws_path = oc_path.map(PathBuf::from)
                     .unwrap_or_else(default_claw_workspace);
 
-                let workspace = adapter::detect_workspace(&ws_path)
+                let workspace = adapter::detect_workspace(&ws_path, false)
                     .ok_or_else(|| format!("No OpenClaw workspace found at {}\nExpected MEMORY.md or memory/ directory.", ws_path.display()))?;
 
                 let summary = adapter::workspace_summary(&workspace);
@@ -95,15 +95,16 @@ fn run(cli: Cli) -> Result<String, String> {
                 return Ok(lines.join("\n"));
             }
 
-            // PicoClaw mode: use the picoclaw adapter
+            // PicoClaw mode: use workspace/memory/ path
             if let Some(pc_path) = picoclaw {
-                let ws_path = pc_path.map(PathBuf::from)
+                let ws_base = pc_path.map(PathBuf::from)
                     .unwrap_or_else(default_picoclaw_workspace);
+                let ws_path = ws_base;
 
-                let workspace = adapter::detect_picoclaw_workspace(&ws_path)
-                    .ok_or_else(|| format!("No PicoClaw workspace found at {}\nExpected memory.md or snippet/ directory.", ws_path.display()))?;
+                let workspace = adapter::detect_workspace(&ws_path, true)
+                    .ok_or_else(|| format!("No PicoClaw workspace found at {}\nExpected memory/ directory.", ws_path.display()))?;
 
-                let summary = adapter::picoclaw_summary(&workspace);
+                let summary = adapter::workspace_summary(&workspace);
                 println!("{}", summary);
 
                 if dry_run {
@@ -112,7 +113,7 @@ fn run(cli: Cli) -> Result<String, String> {
                 }
 
                 let db = get_db()?;
-                let (created, errors) = adapter::migrate_picoclaw(&workspace, &db)?;
+                let (created, errors) = adapter::migrate(&workspace, &db)?;
 
                 let mut lines = vec![
                     format!("\n✅ Captured: {} signals from PicoClaw workspace", created),
