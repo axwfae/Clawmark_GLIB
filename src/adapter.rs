@@ -303,5 +303,3 @@ pub fn migrate_picoclaw(
     Ok((created, errors))
 }
 
-lines.join("\n")
-}
