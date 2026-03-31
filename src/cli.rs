@@ -92,15 +92,19 @@ pub enum Command {
     /// Capture files or directories into your station
     #[command(
         arg_required_else_help = true,
-        after_help = "Examples:\n  clawmark capture notes.md                              Single file\n  clawmark capture ./docs/                               All .md files in directory\n  clawmark capture *.md                                  Shell glob\n  clawmark capture --split notes.md                      Split by ## headers\n  clawmark capture --gist-prefix \"docs:\" a.md            Prefix all gists\n  clawmark capture --openclaw ~/.openclaw/workspace      Import OpenClaw memory\n  clawmark capture --dry-run ./notes/                    Preview without importing\n\nEach file becomes a signal. With --split, each ## section becomes\na threaded signal under the file's root signal.\n\nWith --openclaw, reads MEMORY.md and memory/YYYY-MM-DD.md files,\npreserving timestamps and threading daily sections."
+        after_help = "Examples:\n  clawmark capture notes.md                              Single file\n  clawmark capture ./docs/                               All .md files in directory\n  clawmark capture *.md                                  Shell glob\n  clawmark capture --split notes.md                      Split by ## headers\n  clawmark capture --gist-prefix \"docs:\" a.md            Prefix all gists\n  clawmark capture --openclaw ~/.openclaw/workspace      Import OpenClaw memory\n  clawmark capture --picoclaw ~/.picoclaw/workspace      Import Picoclaw memory\n  clawmark capture --dry-run ./notes/                    Preview without importing\n\nEach file becomes a signal. With --split, each ## section becomes\na threaded signal under the file's root signal.\n\nWith --openclaw, reads MEMORY.md and memory/YYYY-MM-DD.md files,\npreserving timestamps and threading daily sections.\n\nWith --picoclaw, reads workspace/memory/MEMORY.md and\nworkspace/memory/*.md files (different path structure than OpenClaw)."
     )]
     Capture {
-        /// Files or directories to capture (not used with --openclaw)
+        /// Files or directories to capture (not used with --openclaw or --picoclaw)
         paths: Vec<String>,
 
         /// Import an OpenClaw workspace
-        #[arg(long, conflicts_with = "paths")]
+        #[arg(long, conflicts_with = "paths", conflicts_with = "picoclaw")]
         openclaw: Option<Option<String>>,
+
+        /// Import a Picoclaw workspace
+        #[arg(long, conflicts_with = "paths", conflicts_with = "openclaw")]
+        picoclaw: Option<Option<String>>,
 
         /// Split files by ## headers into threaded signals
         #[arg(long)]

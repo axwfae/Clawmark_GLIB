@@ -39,6 +39,11 @@ fn default_claw_workspace() -> PathBuf {
     PathBuf::from(home).join(".openclaw").join("workspace")
 }
 
+fn default_picoclaw_workspace() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".picoclaw").join("workspace")
+}
+
 fn get_db() -> Result<db::DatabaseManager, String> {
     let path = std::env::var("CLAWMARK_STATION")
         .unwrap_or_else(|_| default_station_path().to_string_lossy().to_string());
@@ -55,7 +60,36 @@ fn run(cli: Cli) -> Result<String, String> {
             Ok(include_str!("../skills/SKILL.md").to_string())
         }
 
-        Command::Capture { paths, openclaw, split, gist_prefix, dry_run } => {
+        Command::Capture { paths, openclaw, picoclaw, split, gist_prefix, dry_run } => {
+            // Picoclaw mode: use the adapter
+            if let Some(pc_path) = picoclaw {
+                let ws_path = pc_path.map(PathBuf::from)
+                    .unwrap_or_else(default_picoclaw_workspace);
+
+                let workspace = adapter::detect_picoclaw_workspace(&ws_path)
+                    .ok_or_else(|| format!("No Picoclaw workspace found at {}\nExpected memory/MEMORY.md and memory/YYYYMM/ directories.", ws_path.display()))?;
+
+                let summary = adapter::picoclaw_workspace_summary(&workspace);
+                println!("{}", summary);
+
+                if dry_run {
+                    println!("\n--dry-run: no changes made.");
+                    return Ok(String::new());
+                }
+
+                let db = get_db()?;
+                let (created, errors) = adapter::migrate_picoclaw(&workspace, &db)?;
+
+                let mut lines = vec![
+                    format!("\n✅ Captured: {} signals from Picoclaw workspace", created),
+                ];
+                if errors > 0 {
+                    lines.push(format!("⚠️  {} errors (see above)", errors));
+                }
+                lines.push("Run 'clawmark backfill' to enable semantic search.".to_string());
+                return Ok(lines.join("\n"));
+            }
+
             // OpenClaw mode: use the adapter
             if let Some(oc_path) = openclaw {
                 let ws_path = oc_path.map(PathBuf::from)
@@ -87,7 +121,7 @@ fn run(cli: Cli) -> Result<String, String> {
 
             // General mode: capture files and directories
             if paths.is_empty() {
-                return Err("No files specified. Use 'clawmark capture <files...>' or 'clawmark capture --openclaw'.".to_string());
+                return Err("No files specified. Use 'clawmark capture <files...>', 'clawmark capture --openclaw', or 'clawmark capture --picoclaw'.".to_string());
             }
 
             let mut files: Vec<PathBuf> = Vec::new();
