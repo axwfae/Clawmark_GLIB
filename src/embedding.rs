@@ -21,8 +21,14 @@ fn onnx_model_filename() -> &'static str {
 }
 
 fn default_models_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".clawmark").join("models")
+//    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+//    PathBuf::from(home).join(".clawmark").join("models")
+    let exe_path = std::env::current_exe()
+        .unwrap_or_else(|_| PathBuf::from("."));
+    let dir = exe_path.parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(std::path::Path::new("."));
+    dir.join("models")
 }
 
 pub trait EmbeddingBackend {
